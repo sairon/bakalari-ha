@@ -296,13 +296,16 @@ class BakalariOptionsFlow(config_entries.OptionsFlowWithReload):
             entry = self.config_entry
             credentials = dict(entry.data.get(CONF_CREDENTIALS, {}))
             credentials.pop(child_id, None)
+            options = {**entry.options, CONF_CHILDREN: self.children}
+            # Remove the child and its tokens in one write. The flow manager
+            # then finds the options unchanged, so schedule the reload here.
             self.hass.config_entries.async_update_entry(
-                entry, data={**entry.data, CONF_CREDENTIALS: credentials}
+                entry,
+                data={**entry.data, CONF_CREDENTIALS: credentials},
+                options=options,
             )
-            return self.async_create_entry(
-                title="",
-                data={**self.config_entry.options, CONF_CHILDREN: self.children},
-            )
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+            return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
             step_id="select_child_to_delete", data_schema=data_schema
