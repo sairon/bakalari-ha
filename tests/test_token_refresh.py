@@ -1,14 +1,13 @@
 """Token storage, migration and flow-driven reload regression tests."""
 
+from collections.abc import Generator
 from copy import deepcopy
-from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 from async_bakalari_api import Bakalari
 from async_bakalari_api.datastructure import Credentials
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntries
+from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import frame
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -36,11 +35,8 @@ CHILD = {
 
 
 @pytest.fixture
-async def runtime(tmp_path: Path):
-    """Use HA's real entry manager without disk writes or integration setup."""
-    hass = HomeAssistant(str(tmp_path))
-    hass.config_entries = ConfigEntries(hass, {})
-    frame.async_setup(hass)
+def entry(hass: HomeAssistant) -> MockConfigEntry:
+    """Register a migrated entry with one child."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=2,
@@ -48,16 +44,23 @@ async def runtime(tmp_path: Path):
         options={CONF_CHILDREN: {"child": dict(CHILD)}, "scan_interval": 300},
     )
     entry.add_to_hass(hass)
-    with (
-        patch.object(hass.config_entries, "_async_schedule_save"),
-        patch.object(
-            hass.config_entries, "async_reload", new_callable=AsyncMock
-        ) as reload,
-        patch.object(hass.config_entries, "async_schedule_reload") as schedule,
-    ):
-        yield hass, entry, reload, schedule
-        await hass.async_block_till_done()
-    frame.async_setup(None)  # pyright: ignore[reportArgumentType]
+    return entry
+
+
+@pytest.fixture
+def reload(hass: HomeAssistant) -> Generator[AsyncMock]:
+    """Capture entry reloads so the integration is never set up."""
+    with patch.object(
+        hass.config_entries, "async_reload", new_callable=AsyncMock
+    ) as reload:
+        yield reload
+
+
+@pytest.fixture
+def schedule(hass: HomeAssistant) -> Generator[Mock]:
+    """Capture scheduled entry reloads so the integration is never set up."""
+    with patch.object(hass.config_entries, "async_schedule_reload") as schedule:
+        yield schedule
 
 
 def make_client(hass: HomeAssistant, entry: MockConfigEntry) -> BakalariClient:
@@ -68,9 +71,10 @@ def make_client(hass: HomeAssistant, entry: MockConfigEntry) -> BakalariClient:
     return client
 
 
-async def test_refresh_and_reset_do_not_reload(runtime):
+async def test_refresh_and_reset_do_not_reload(
+    hass: HomeAssistant, entry: MockConfigEntry, reload: AsyncMock, schedule: Mock
+):
     """Refreshes persist in data and resetting one client needs no entry reload."""
-    hass, entry, reload, schedule = runtime
     client = make_client(hass, entry)
     original_options = deepcopy(dict(entry.options))
     for generation in range(2):
@@ -103,9 +107,8 @@ async def test_refresh_and_reset_do_not_reload(runtime):
 
 
 @pytest.mark.parametrize("children", [{"child": {**CHILD, **TOKENS}}, []])
-async def test_migration(runtime, children):
+async def test_migration(hass: HomeAssistant, children):
     """Migrate populated entries and the legacy empty-list initial entry."""
-    hass, _, _, _ = runtime
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=1,
@@ -131,9 +134,10 @@ async def test_migration(runtime, children):
     assert entry.data == before
 
 
-async def test_options_edit_preserves_refreshed_tokens(runtime):
+async def test_options_edit_preserves_refreshed_tokens(
+    hass: HomeAssistant, entry: MockConfigEntry, schedule: Mock
+):
     """An open options form cannot overwrite tokens refreshed in the meantime."""
-    hass, entry, _, schedule = runtime
     flow = BakalariOptionsFlow(entry)
     flow.hass = hass
     flow.handler = entry.entry_id
@@ -153,9 +157,10 @@ async def test_options_edit_preserves_refreshed_tokens(runtime):
     schedule.assert_called_once_with(entry.entry_id)
 
 
-async def test_delete_and_inflight_refresh(runtime):
+async def test_delete_and_inflight_refresh(
+    hass: HomeAssistant, entry: MockConfigEntry, schedule: Mock
+):
     """Deleting a child removes its credentials and in-flight saves cannot restore it."""
-    hass, entry, _, schedule = runtime
     client = make_client(hass, entry)
     flow = BakalariOptionsFlow(entry)
     flow.hass = hass
@@ -170,9 +175,10 @@ async def test_delete_and_inflight_refresh(runtime):
     schedule.assert_called_once_with(entry.entry_id)
 
 
-async def test_reauth_updates_data_and_reloads(runtime):
+async def test_reauth_updates_data_and_reloads(
+    hass: HomeAssistant, entry: MockConfigEntry, schedule: Mock
+):
     """Reauth explicitly reloads with new tokens while preserving other accounts."""
-    hass, entry, _, schedule = runtime
     hass.config_entries.async_update_entry(
         entry,
         data={
@@ -209,9 +215,8 @@ async def test_reauth_updates_data_and_reloads(runtime):
     schedule.assert_called_once_with(entry.entry_id)
 
 
-async def test_add_child(runtime):
+async def test_add_child(hass: HomeAssistant, entry: MockConfigEntry, schedule: Mock):
     """Adding a child saves credentials separately and reloads on flow completion."""
-    hass, entry, _, schedule = runtime
     flow = BakalariOptionsFlow(entry)
     flow.hass = hass
     flow.handler = entry.entry_id
@@ -234,9 +239,10 @@ async def test_add_child(runtime):
     schedule.assert_called_once_with(entry.entry_id)
 
 
-async def test_login_existing_child_reloads_with_unchanged_options(runtime):
+async def test_login_existing_child_reloads_with_unchanged_options(
+    hass: HomeAssistant, entry: MockConfigEntry, schedule: Mock
+):
     """Replacing credentials through Add must reload even with identical settings."""
-    hass, entry, _, schedule = runtime
     flow = BakalariOptionsFlow(entry)
     flow.hass = hass
     flow.handler = entry.entry_id
@@ -258,9 +264,10 @@ async def test_login_existing_child_reloads_with_unchanged_options(runtime):
     schedule.assert_called_once_with(entry.entry_id)
 
 
-async def test_unchanged_options_do_not_reload(runtime):
+async def test_unchanged_options_do_not_reload(
+    hass: HomeAssistant, entry: MockConfigEntry, schedule: Mock
+):
     """Submitting unchanged settings leaves the running integration alone."""
-    hass, entry, _, schedule = runtime
     flow = BakalariOptionsFlow(entry)
     flow.hass = hass
     flow.handler = entry.entry_id
@@ -272,9 +279,10 @@ async def test_unchanged_options_do_not_reload(runtime):
     schedule.assert_not_called()
 
 
-async def test_client_loads_credentials_from_data(runtime):
+async def test_client_loads_credentials_from_data(
+    hass: HomeAssistant, entry: MockConfigEntry
+):
     """A newly created client authenticates using migrated credentials."""
-    hass, entry, _, _ = runtime
     client = BakalariClient(hass, entry, "child")
     with (
         patch(
