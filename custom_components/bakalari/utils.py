@@ -87,54 +87,6 @@ def children_list_to_dict(raw_list: list[dict[str, Any]] | None) -> ChildrenMap:
     return out
 
 
-def ensure_child_record(obj: Any, child_id: str) -> ChildRecord:
-    """Return a normalized ChildRecord for the given child_id.
-
-    Accepts:
-    - raw child record (dict)
-    - children map dict {child_id: child_record}
-    - list of raw child records
-    """
-
-    raw: dict[str, Any] | None = None
-
-    # Case 1: children map dict
-    if isinstance(obj, dict) and child_id in obj and isinstance(obj[child_id], dict):
-        raw = obj.get(child_id)
-
-    # Case 2: raw child dict
-    elif isinstance(obj, dict) and (
-        CONF_USER_ID in obj
-        or CONF_SERVER in obj
-        or CONF_NAME in obj
-        or "credentials" in obj
-    ):
-        raw = obj
-
-    # Case 3: list of raw child dicts
-    elif isinstance(obj, list):
-        for item in obj:
-            if not isinstance(item, dict):
-                continue
-            creds = item.get("credentials") or {}
-            uid = item.get(CONF_USER_ID) or (
-                creds.get(CONF_USER_ID) if isinstance(creds, dict) else None
-            )
-            if str(uid) == str(child_id):
-                raw = item
-                break
-
-    # Fallback: build minimal raw record with given child_id
-    if raw is None:
-        raw = {CONF_USER_ID: str(child_id)}
-
-    _, child = child_from_raw(raw)
-    if child_id:
-        child[CONF_USER_ID] = str(child_id)
-        child = CHILD_STORAGE_SCHEMA(child)
-    return child
-
-
 def ensure_children_dict(obj: Any) -> ChildrenMap:
     """Accept any object and return a ChildrenMap.
 
