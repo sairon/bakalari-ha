@@ -2,9 +2,9 @@
 
 from copy import deepcopy
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from async_bakalari_api import Bakalari
 from async_bakalari_api.datastructure import Credentials
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntries
 from homeassistant.core import HomeAssistant
@@ -57,13 +57,13 @@ async def runtime(tmp_path: Path):
     ):
         yield hass, entry, reload, schedule
         await hass.async_block_till_done()
-    frame.async_setup(None)
+    frame.async_setup(None)  # pyright: ignore[reportArgumentType]
 
 
 def make_client(hass: HomeAssistant, entry: MockConfigEntry) -> BakalariClient:
     """Create a client with already installed credentials."""
     client = BakalariClient(hass, entry, "child")
-    client.lib = SimpleNamespace(credentials=Credentials(**TOKENS))
+    client.lib = Mock(spec=Bakalari, credentials=Credentials(**TOKENS))
     client._last_tokens = (TOKENS[CONF_ACCESS_TOKEN], TOKENS[CONF_REFRESH_TOKEN])
     return client
 
@@ -202,7 +202,7 @@ async def test_reauth_updates_data_and_reloads(runtime):
         ),
     ):
         result = await flow.async_step_reauth_confirm({"password": "password"})
-    assert result["reason"] == "reauth_successful"
+    assert result.get("reason") == "reauth_successful"
     assert entry.data[CONF_CREDENTIALS]["child"][CONF_ACCESS_TOKEN] == "login"
     assert entry.data[CONF_CREDENTIALS]["other"] == TOKENS
     assert entry.options[CONF_CHILDREN]["child"] == CHILD

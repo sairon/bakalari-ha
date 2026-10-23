@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from typing import Any, cast
 import uuid
@@ -158,11 +159,11 @@ def ensure_children_dict(obj: Any) -> ChildrenMap:
     return {}
 
 
-def redact_child_info(child_info: ChildRecord) -> ChildRecord:
+def redact_child_info(child_info: Mapping[str, Any]) -> dict[str, Any]:
     """Redact sensitive information from child info."""
 
     # Do not mutate the original dict; return a shallow copy with redacted fields
-    redacted: ChildRecord = cast(ChildRecord, dict(child_info))
+    redacted = dict(child_info)
 
     if CONF_ACCESS_TOKEN in redacted:
         redacted[CONF_ACCESS_TOKEN] = "***" if redacted[CONF_ACCESS_TOKEN] else "EMPTY!"

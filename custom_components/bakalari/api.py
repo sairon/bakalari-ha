@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 import logging
 from time import time
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 from async_bakalari_api import Bakalari, Komens, Marks, Timetable
 from async_bakalari_api.datastructure import Credentials
@@ -177,10 +177,13 @@ class BakalariClient:
         """Get the current child record."""
 
         entry = self._current_entry()
-        return {
-            **entry.options[CONF_CHILDREN][self.child_id],
-            **entry.data.get(CONF_CREDENTIALS, {}).get(self.child_id, {}),
-        }
+        return cast(
+            ChildRecord,
+            {
+                **entry.options[CONF_CHILDREN][self.child_id],
+                **entry.data.get(CONF_CREDENTIALS, {}).get(self.child_id, {}),
+            },
+        )
 
     def _validate_child_tokens(self, child: ChildRecord) -> bool:
         """Validate child tokens."""
